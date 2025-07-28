@@ -1,0 +1,98 @@
+---
+import RegistrationForm from '../ui/RegistrationForm.tsx';
+
+const wompiPublicKey = import.meta.env.PUBLIC_WOMPI_PUBLIC_KEY;
+const apiBaseUrl = import.meta.env.PUBLIC_API_BASE_URL;
+---
+
+<section id="registro" class="py-20 bg-gradient-to-b from-[#191e3b] to-[#151933]">
+  <div class="container mx-auto px-4">
+    <h2 class="text-3xl font-bold text-center mb-12 text-white">Registro</h2>
+    <RegistrationForm client:load />
+  </div>
+</section>
+
+<script define:vars={{ wompiPublicKey, apiBaseUrl }}>
+  window.handleWompiPayment = async function() {
+    const form = document.getElementById('registration-form');
+    if (!form) return;
+
+    const formData = new FormData(form);
+    const userData = Object.fromEntries(formData.entries());
+
+    console.log("Datos recolectados del formulario:", userData);
+
+    if (!userData.name || !userData.lastname || !userData.email || !userData.phone || !userData.document || !userData.targetDate) {
+      alert("Por favor, completa todos los campos para continuar.");
+      return;
+    }
+
+    const button = document.getElementById('wompi-button');
+    if (button) {
+        button.disabled = true;
+        button.textContent = 'Procesando...';
+    }
+
+    try {
+      const reference = `ia_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 8)}`;
+      
+      const payload = {
+        name: userData.name,
+        lastname: userData.lastname,
+        email: userData.email,
+        phone: userData.phone,
+        document: userData.document,
+        numSeats: '1',
+        selected_course: userData.targetDate,
+        payment_reference: reference
+      };
+
+      const registerResponse = await fetch(`${apiBaseUrl}landing-ia/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!registerResponse.ok) {
+          const errorData = await registerResponse.json();
+          throw new Error(`Falló el registro: ${errorData.message || 'Error desconocido'}`);
+      }
+      
+      const signatureResponse = await fetch(`${apiBaseUrl}wompi/generate-signature`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reference, amountInCents: 9700000, currency: 'COP' })
+      });
+      if (!signatureResponse.ok) throw new Error('Falló la obtención de la firma');
+      const { signature } = await signatureResponse.json();
+
+      const checkout = new window.WidgetCheckout({
+        currency: 'COP',
+        amountInCents: 9700000,
+        reference: reference,
+        publicKey: wompiPublicKey,
+        redirectUrl: `${window.location.origin}/pago-exitoso`,
+        'signature:integrity': signature
+      });
+
+      checkout.open(function (result) {
+        if (button) {
+            button.disabled = false;
+            button.textContent = 'Paga Ahora con Wompi';
+        }
+        
+        const transaction = result.transaction;
+        if (transaction && transaction.status === 'APPROVED') {
+          window.location.href = '/pago-exitoso';
+        }
+      });
+
+    } catch (error) {
+      console.error("Error en el proceso de pago:", error);
+      alert(`Ocurrió un error al iniciar el pago: ${error.message}`);
+      if (button) {
+          button.disabled = false;
+          button.textContent = 'Paga Ahora con Wompi';
+      }
+    }
+  }
+</script>
